@@ -1,2 +1,5 @@
 dumps/
 mysql/
+AGENTS.md
+tests/fixtures/mariadb-*.tar.gz
+tests/output/

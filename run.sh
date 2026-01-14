@@ -6,6 +6,34 @@ YELLOW="\033[1;33m"
 RED="\033[0;31m"
 RESET="\033[0m"
 
+# Sanitization functions
+sanitize_path() {
+    local input_path="$1"
+    local resolved_path
+    if command -v realpath >/dev/null 2>&1; then
+        resolved_path=$(realpath "$input_path" 2>/dev/null)
+    else
+        # Fallback using cd and pwd
+        resolved_path=$(cd "$input_path" 2>/dev/null && pwd)
+    fi
+    if [ -z "$resolved_path" ]; then
+        echo "Invalid path '$input_path'"
+        return 1
+    fi
+    echo "$resolved_path"
+    return 0
+}
+
+sanitize_db_name() {
+    local name="$1"
+    if ! [[ "$name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+        echo "Invalid database name '$name'"
+        return 1
+    fi
+    echo "$name"
+    return 0
+}
+
 # Defaults
 DATA_DIR="$(pwd)/mysql"
 DUMPS_DIR="$(pwd)/dumps"
@@ -75,8 +103,37 @@ while [[ $# -gt 0 ]]; do
       echo -e "${RED}Unknown option: $1${RESET}"
       exit 1
       ;;
-  esac
+   esac
 done
+
+# Sanitize inputs
+if ! DATA_DIR=$(sanitize_path "$DATA_DIR"); then
+    exit 1
+fi
+if ! DUMPS_DIR=$(sanitize_path "$DUMPS_DIR"); then
+    exit 1
+fi
+if [ -n "$USER_DB" ]; then
+    if ! USER_DB=$(sanitize_db_name "$USER_DB"); then
+        exit 1
+    fi
+fi
+if [ -n "$USER_SKIP_TABLES" ]; then
+    IFS=',' read -ra TABLES <<< "$USER_SKIP_TABLES"
+    for table in "${TABLES[@]}"; do
+        table=$(echo "$table" | xargs)
+        if ! [[ "$table" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+            echo -e "${RED}Error: Invalid table name in --skip-tables '$table'${RESET}"
+            exit 1
+        fi
+    done
+fi
+if [ -n "$USER_VERSION" ]; then
+    if ! [[ "$USER_VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        echo -e "${RED}Error: Invalid version format '$USER_VERSION'. Expected x.y${RESET}"
+        exit 1
+    fi
+fi
 
 # Validate recovery level (0-6)
 if ! [[ "$USER_RECOVERY" =~ ^[0-6]$ ]]; then
@@ -85,8 +142,8 @@ if ! [[ "$USER_RECOVERY" =~ ^[0-6]$ ]]; then
 fi
 
 # Validate table format (db.table)
-if [ -n "$USER_TABLE" ] && ! [[ "$USER_TABLE" =~ ^[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+$ ]]; then
-  echo -e "${RED}Error: Table must be in format 'db.table'. Ignoring --table.${RESET}"
+if [ -n "$USER_TABLE" ] && ! [[ "$USER_TABLE" =~ ^[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+  echo -e "${RED}Error: Table must be in format 'db.table' with valid SQL identifiers. Ignoring --table.${RESET}"
   USER_TABLE=""
 fi
 
@@ -194,13 +251,13 @@ if [ -z "$USER_VERSION" ]; then
     fi
   fi
 
-  # Fallback: mysql_upgrade_info (if present)
-  if [ -z "$DETECTED_TAG" ] && [ -f "$DATA_DIR/mysql_upgrade_info" ]; then
-    UPG_VER=$(cat "$DATA_DIR/mysql_upgrade_info" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    if [ -n "$UPG_VER" ]; then
-      DETECTED_TAG="$UPG_VER"
+   # Fallback: mysql_upgrade_info (if present)
+    if [ -z "$DETECTED_TAG" ] && [ -f "$DATA_DIR/mysql/mysql_upgrade_info" ]; then
+      UPG_VER=$(grep -oE '[0-9]+\.[0-9]+' "$DATA_DIR/mysql/mysql_upgrade_info" | head -1)
+      if [ -n "$UPG_VER" ]; then
+        DETECTED_TAG="$UPG_VER"
+      fi
     fi
-  fi
 
   if [ -n "$DETECTED_TAG" ]; then
     VERSION="$DETECTED_TAG"
@@ -233,6 +290,16 @@ if [ -n "$USER_MARIADB_ARGS" ]; then
 fi
 if [ -n "$USER_NOCOMPRESS" ]; then
   echo -e "${GREEN}Dumping without compression (.sql files)${RESET}"
+fi
+
+# Validate Docker availability
+if ! command -v docker >/dev/null 2>&1; then
+    echo -e "${RED}Error: Docker is not installed or not in PATH.${RESET}" >&2
+    exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+    echo -e "${RED}Error: Docker daemon is not running.${RESET}" >&2
+    exit 1
 fi
 
 # === RUN THE ONE-SHOT CONTAINER (no password env needed) ===

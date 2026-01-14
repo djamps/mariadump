@@ -13,9 +13,9 @@ Use only on a copy/backup of your data folder.   Damage to database can occur if
 ## Prerequisites
 
 - Linux or WSL on Windows.
-- Docker installed and running.
+- Docker installed and running (the tool will check and report if not available).
 - Both scripts (`dump.sh` and `run.sh`) in your working directory.
-- MySQL/MariaDB data in `./mysql` (relative to current directory, override with --data-dir).
+- MySQL/MariaDB data in `./mysql` (relative to current directory, override with --data-dir; paths are validated for security).
 - The minimum files/folders inside the data folder required to run the container are: `mysql` (database), `ibdata1`, `ib_logfile*`, and at least one database folder.
 
 ## Notes
@@ -106,3 +106,5 @@ Use only on a copy/backup of your data folder.   Damage to database can occur if
 ## Additional notes
 
 The container runs in the foreground, logging all progress to the console.  It exits automatically.   If anything goes wrong, the reason should be evident on the console.
+
+To run the test suite, ensure Bats is installed (`npm install -g bats`) and execute `bats tests/`.

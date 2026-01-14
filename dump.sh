@@ -7,13 +7,17 @@ RED="\033[0;31m"
 RESET="\033[0m"
 
 # Start MariaDB in recovery mode (bypasses password/auth), with optional InnoDB force recovery and mariadb args
+printf "%b\n" "${GREEN}Starting MariaDB in recovery mode...${RESET}"
 RECOVERY="${INNODB_FORCE_RECOVERY:-0}"
 MARIADB_ARGS="${MARIADB_ARGS:-}"
-/usr/local/bin/docker-entrypoint.sh mysqld --skip-grant-tables --innodb-force-recovery="$RECOVERY" ${MARIADB_ARGS} &
+if [ -n "$MARIADB_ARGS" ]; then
+    /usr/local/bin/docker-entrypoint.sh mysqld --skip-grant-tables --innodb-force-recovery="$RECOVERY" "$MARIADB_ARGS" &
+else
+    /usr/local/bin/docker-entrypoint.sh mysqld --skip-grant-tables --innodb-force-recovery="$RECOVERY" &
+fi
 pid=$!
 
 # Wait for MariaDB to be ready (loop until ready or crash)
-ready=0
 while true; do
   # Check if process crashed (exited prematurely)
   if ! kill -0 $pid 2>/dev/null; then
@@ -22,7 +26,6 @@ while true; do
   fi
 
   if mysqladmin ping -u root --silent; then
-    ready=1
     break
   fi
   sleep 1
@@ -86,9 +89,10 @@ if [ -n "${SPECIFIC_TABLE}" ]; then
       wait $pid
       exit 20
     fi
-    printf "%b\n" "${YELLOW}Dumping specific table: ${db}.${table}${RESET}"
-    DUMP_CMD="mysqldump -u root \"${db}\" \"${table}\" ${MYSQLDUMP_ARGS}"
-    eval "$DUMP_CMD ${COMPRESS_PIPE}" > "/dumps/${db}.${table}${EXT}"
+     printf "%b\n" "${YELLOW}Dumping specific table: ${db}.${table}${RESET}"
+     DUMP_CMD="mysqldump -u root \"${db}\" \"${table}\" ${MYSQLDUMP_ARGS}"
+     eval "$DUMP_CMD ${COMPRESS_PIPE}" > "/dumps/${db}.${table}${EXT}"
+     printf "%b\n" "${GREEN}Dump of table ${db}.${table} completed.${RESET}"
   else
     printf "%b\n" "${RED}Invalid specific table format. Skipping dump.${RESET}"
     kill $pid
@@ -120,21 +124,23 @@ elif [ -n "${SPECIFIC_DB}" ]; then
     IFS="$oldIFS"
   fi
 
-  # Dump the database (with ignores if any, and mysqldump args)
-  DUMP_CMD="mysqldump -u root --databases \"${SPECIFIC_DB}\" ${ignore_flags} ${MYSQLDUMP_ARGS}"
-  eval "$DUMP_CMD ${COMPRESS_PIPE}" > "/dumps/${SPECIFIC_DB}${EXT}"
+   # Dump the database (with ignores if any, and mysqldump args)
+   DUMP_CMD="mysqldump -u root --databases \"${SPECIFIC_DB}\" ${ignore_flags} ${MYSQLDUMP_ARGS}"
+   eval "$DUMP_CMD ${COMPRESS_PIPE}" > "/dumps/${SPECIFIC_DB}${EXT}"
+   printf "%b\n" "${GREEN}Dump of database ${SPECIFIC_DB} completed.${RESET}"
 
 # Else, dump all non-system databases
 else
   # Get list of databases, excluding system ones
   databases=$(mysql -u root -e "SHOW DATABASES;" | tail -n +2 | grep -v -E 'mysql|information_schema|performance_schema')
 
-  # Dump each database to a gzipped file in /dumps
-  for db in $databases; do
-    printf "%b\n" "${YELLOW}Dumping database: $db${RESET}"
-    DUMP_CMD="mysqldump -u root --databases \"$db\" ${MYSQLDUMP_ARGS}"
-    eval "$DUMP_CMD ${COMPRESS_PIPE}" > "/dumps/${db}${EXT}"
-  done
+   # Dump each database to a gzipped file in /dumps
+   for db in $databases; do
+     printf "%b\n" "${YELLOW}Dumping database: $db${RESET}"
+     DUMP_CMD="mysqldump -u root --databases \"$db\" ${MYSQLDUMP_ARGS}"
+     eval "$DUMP_CMD ${COMPRESS_PIPE}" > "/dumps/${db}${EXT}"
+     printf "%b\n" "${GREEN}Dump of database $db completed.${RESET}"
+   done
 fi
 
 printf "%b\n" "${GREEN}Dumping complete.${RESET}"
